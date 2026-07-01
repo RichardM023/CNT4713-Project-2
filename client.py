@@ -148,12 +148,14 @@ def main():
 
             if serverResponse == "200":
                     print(serverMessage[0], "status code received. Login successful")
+#I commnented out the listener thread due to possible conflict it could have with the context required for project 2
+#Since it could receive the file before  it reachs the correct command and cause errors.
 
-            if receiverStarted == False:
-                     thread = threading.Thread(
-                     target=listenForMessages, args=(dataSocket,),daemon=True)
-                     thread.start()
-                     receiverStarted = True
+          #  if receiverStarted == False:
+          #           thread = threading.Thread(
+           #          target=listenForMessages, args=(dataSocket,),daemon=True)
+           #          thread.start()
+           #          receiverStarted = True
 
             else:
                     print("500 status code received.")
@@ -235,6 +237,117 @@ def main():
            #  else:
             #      print("500 status code received.")
 
+# Project 2 
+# Requests a list of files currently stored on the server.
+# The server responds with 200 and a comma-separated list of filenames.
+        elif command == "list":
+             if clientSocket is None or dataSocket is None:
+                  print("You must connect first.")
+                  continue
+             
+             if len(userParts) != 1:
+                  print("list")
+                  continue
+             
+             clientSocket.sendall(userInput.encode())
+
+             serverResponse = dataSocket.recv(1024).decode()
+             serverMessage = serverResponse.splitlines()
+
+             if serverMessage[0] == "200":
+                  if len(serverMessage) >= 3:
+                       print("200 status code received. Files:", serverMessage[2])
+                  else:
+                       print("200 status code received.")
+             else:
+                 print("500 status code received.")
+
+
+# dele command
+# Requests the server to delete a file by filename.
+# The server responds with 200 if the file was deleted or 500 if it failed.
+        elif command == "dele":
+             if clientSocket is None or dataSocket is None:
+                  print("You must connect first.")
+                  continue
+             
+             if len(userParts) != 2:
+                  print("dele <filename>")
+                  continue
+             
+             clientSocket.sendall(userInput.encode())
+
+             serverResponse = dataSocket.recv(1024).decode().strip()
+
+             if serverResponse == "200":
+                  print("200 status code received. File deleted.")
+             else:
+                  print("500 status code received.")
+
+
+# stor command
+# Uploads a local file from the client to the server.
+# The command is sent through the control socket and the file contents are sent through the data socket.
+        elif command == "stor":
+             if clientSocket is None or dataSocket is None:
+                  print("You must connect first.")
+                  continue
+             
+             if len(userParts) != 2:
+                  print("stor <filename>")
+                  continue
+             
+             filename = userParts[1]
+
+             try:
+                  file = open(filename, "rb")
+                  fileData = file.read()
+                  file.close()
+             except OSError:
+                  continue
+             
+             clientSocket.sendall(userInput.encode())
+             dataSocket.sendall(fileData)
+
+             serverResponse = dataSocket.recv(1024).decode().strip()
+
+             if serverResponse == "200":
+                  print("200 status code received. File Sent.")
+             else:
+                  print("500 status code received.")
+
+
+
+# retr command
+# Requests a file from the server and saves the received file contents on the client side.
+# The filename is sent through the control socket and the file data comes back through the data socket.
+        elif command == "retr":
+            if clientSocket is None or dataSocket is None:
+                print("You must connect first.")
+                continue
+
+            if len(userParts) != 2:
+                print("retr <filename>")
+                continue
+
+            filename = userParts[1]
+
+            clientSocket.sendall(userInput.encode())
+
+            serverResponse = dataSocket.recv(4096)
+
+            if serverResponse.decode(errors="ignore").startswith("500"):
+                print("500 status code received.")
+                continue
+
+            newFilename = "downloaded_" + filename
+
+            file = open(newFilename, "wb")
+            file.write(serverResponse)
+            file.close()
+
+            print("File retrieved.")           
+             
         else:
             print("Unknown command.")
 
