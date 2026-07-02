@@ -1,6 +1,7 @@
 import socket
 import sys
 import threading
+import os
 
 clients = {}
 
@@ -69,7 +70,6 @@ def handle_client(control_sock, data_listener):
                 clients[username] = data_sock
                 send_response(data_sock, 200)
 
-
             # who
             elif command == "who":
                 print("Who requested. Sending users.")
@@ -122,7 +122,7 @@ def handle_client(control_sock, data_listener):
                 send_response(clients[recipient], 200,
                               "Private\n" + sender + "\n" + text)
                 send_response(data_sock, 200)
-
+            
             # quit
             elif command == "quit":
                 if username is not None:
@@ -132,9 +132,51 @@ def handle_client(control_sock, data_listener):
                 send_response(data_sock, 200)
                 break
 
+            #Project 2 - List
+            #Returns a list of all files in the current directory to the client.
+            elif command == "list":
+                if username is not None:
+                    print("List requested by", username + ". Sending files.")
+                else:
+                    print("List requested. Sending files.")
+
+                files = []
+
+                for file in os.listdir("."):
+                        if os.path.isfile(file):
+                            files.append(file)
+
+                listing = ", ".join(files)
+                send_response(data_sock, 200, listing)
+
+            #Project 2 - Delete
+            #Deletes a specified file from the server's current directory.
+            elif command == "dele":
+                if len(words) != 2:
+                    send_response(data_sock, 500)
+                    continue
+
+                filename = words[1]
+
+                if username is not None:
+                    print("Delete requested by", username + ". Deleting file:", filename)
+                else:
+                    print("Delete requested. Deleting file:", filename)
+
+                try:
+                    os.remove(filename)
+                    
+                    print ("Delete complete")
+                    send_response(data_sock, 200)
+                
+                except OSError:
+                    send_response(data_sock, 500)
+            
             # unknown command
             else:
                 send_response(data_sock, 500)
+                
+            
 
     except OSError:
         pass  # a socket error means the client is disconnected
