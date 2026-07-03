@@ -204,7 +204,9 @@ def handle_client(control_sock, data_listener):
                     data_sock.settimeout(None)
 
                 try:
-                    with open(filename, "wb") as f:
+                    file_path = os.path.join(SERVER_FOLDER, filename)
+
+                    with open(file_path, "wb") as f:
                         f.write(file_data)
                     print("STOR complete")
                     send_response(data_sock, 200)
