@@ -167,7 +167,8 @@ def handle_client(control_sock, data_listener):
                     print("Delete requested. Deleting file:", filename)
 
                 try:
-                    os.remove(filename)
+                    file_path = os.path.join(SERVER_FOLDER, filename)
+                    os.remove(file_path)   #deletes the file from the server's folder#
                     
                     print ("Delete complete")
                     send_response(data_sock, 200)
@@ -228,7 +229,8 @@ def handle_client(control_sock, data_listener):
                     print("Retr requested. Sending file:", filename)
 
                 try:
-                    with open(filename, "rb") as f:
+                    file_path = os.path.join(SERVER_FOLDER, filename)   #retrieves files from the server's folder
+                    with open(file_path, "rb") as f:
                         file_data = f.read()
                 except OSError:
                     send_response(data_sock, 500)
