@@ -330,7 +330,7 @@ def main():
                 print("retr <filename>")
                 continue
 
-            filename = userParts[1]
+            filename = userParts[1].strip()
 
             clientSocket.sendall(userInput.encode())
 
