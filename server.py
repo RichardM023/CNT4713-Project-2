@@ -3,6 +3,9 @@ import sys
 import threading
 import os
 
+SERVER_FOLDER = "server_files"
+os.makedirs(SERVER_FOLDER, exist_ok=True)   #creates a seperate folder for the server files
+
 clients = {}
 
 # sends a response to a single client
@@ -142,9 +145,9 @@ def handle_client(control_sock, data_listener):
 
                 files = []
 
-                for file in os.listdir("."):
-                        if os.path.isfile(file):
-                            files.append(file)
+                for file in os.listdir(SERVER_FOLDER):
+                    if os.path.isfile(os.path.join(SERVER_FOLDER, file)):
+                        files.append(file)
 
                 listing = ", ".join(files)
                 send_response(data_sock, 200, listing)
