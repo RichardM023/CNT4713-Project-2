@@ -171,18 +171,77 @@ def handle_client(control_sock, data_listener):
                 
                 except OSError:
                     send_response(data_sock, 500)
-            
-            # unknown command
+
+            # project 2 - stor
+            # receives a file's contents and saves it in the directory 
+
+            elif command == "stor":
+                if len(words) != 2:
+                    send_response(data_sock, 500)
+                    continue
+
+                filename = words[1]
+
+                if username is not None:
+                    print("Stor", filename, "requested by", username)
+                else:
+                    print("Stor", filename, "requested")
+
+                file_data = b""
+                data_sock.settimeout(1.0)
+                try:
+                    while True:
+                        chunk = data_sock.recv(4096)
+                        if not chunk:
+                            break
+                        file_data += chunk
+                except socket.timeout:
+                    pass
+                finally:
+                    data_sock.settimeout(None)
+
+                try:
+                    with open(filename, "wb") as f:
+                        f.write(file_data)
+                    print("STOR complete")
+                    send_response(data_sock, 200)
+                except OSError:
+                    send_response(data_sock, 500)
+
+            # project 2 - Retr
+            # sends the file's contents back over the data port
+            elif command == "retr":
+                if len(words) != 2:
+                    send_response(data_sock, 500)
+                    continue
+
+                filename = words[1]
+
+                if username is not None:
+                    print("Retr requested by", username + ". Sending file:", filename)
+                else:
+                    print("Retr requested. Sending file:", filename)
+
+                try:
+                    with open(filename, "rb") as f:
+                        file_data = f.read()
+                except OSError:
+                    send_response(data_sock, 500)
+                    continue
+
+                data_sock.sendall(file_data)
+                print("File sent.")
+
             else:
                 send_response(data_sock, 500)
                 
             
 
     except OSError:
-        pass  # a socket error means the client is disconnected
+        pass 
 
     finally:
-        # remove the user and tell everyone they left
+        # remove the user 
         if username is not None:
             if username in clients:
                 del clients[username] 
