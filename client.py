@@ -1,5 +1,33 @@
 import socket
 import threading
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+
+def createKeys():
+     key = RSA.generate(2048)
+     privateKey = key
+     publicKey = key.publickey()
+     return privateKey, publicKey
+
+def publicKeyToString(publicKey):
+    return publicKey.export_key().decode()
+
+
+def stringToPublicKey(publicKeyText):
+    return RSA.import_key(publicKeyText.encode())
+
+
+def encryptMessage(message, publicKey):
+    cipher = PKCS1_OAEP.new(publicKey)
+    encryptedMessage = cipher.encrypt(message.encode())
+    return encryptedMessage
+
+
+def decryptMessage(encryptedMessage, privateKey):
+    cipher = PKCS1_OAEP.new(privateKey)
+    decryptedMessage = cipher.decrypt(encryptedMessage)
+    return decryptedMessage.decode()
+
 
 def listenForMessages(dataSocket):
     while True:
@@ -59,6 +87,9 @@ def main():
     clientSocket = None
     dataSocket = None
     receiverStarted = False
+
+    clientPrivateKey, clientPublicKey = createKeys()
+    serverPublicKey = None
     
     while True:
         userInput = input("> ").strip()

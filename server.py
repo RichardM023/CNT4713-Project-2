@@ -2,6 +2,9 @@ import socket
 import sys
 import threading
 import os
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+
 
 SERVER_FOLDER = "server_files"
 os.makedirs(SERVER_FOLDER, exist_ok=True)   #creates a seperate folder for the server files
