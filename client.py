@@ -151,19 +151,30 @@ def main():
 #
 #
         elif command == "quit":
-             if clientSocket is None or dataSocket is None:
-                  print("You must connect first.")
-                  continue
-             clientSocket.sendall(userInput.encode())
+            if clientSocket is None or dataSocket is None:
+                print("You must connect first.")
+                continue
 
-             serverResponse = dataSocket.recv(1024).decode().strip()
+            if serverPublicKey is None:
+                print("You must connect first.")
+                continue
 
-             if serverResponse == "200":
-                    print(serverMessage[0], "status code received")
+            encryptedCommand = encryptMessage(userInput, serverPublicKey)
+            clientSocket.sendall(encryptedCommand)
 
-             clientSocket.close()
-             dataSocket.close()
-             break
+            encryptedResponse = dataSocket.recv(4096)
+            print("Received encrypted message")
+
+            serverResponse = decryptMessage(encryptedResponse, clientPrivateKey)
+
+            if serverResponse.strip() == "200":
+                print("200 status code received.")
+            else:
+                print("500 status code received.")
+
+            clientSocket.close()
+            dataSocket.close()
+            break
 
 #login command
 # 
@@ -184,7 +195,7 @@ def main():
             username = userParts[1]
             clientPublicKeyText = publicKeyToString(clientPublicKey)
 
-            loginMessage = "login\n\n" + username + "\n" + clientPublicKeyText
+            loginMessage = "login\n\n" + username + "\n" + clientPublicKeyText #message being sent to the server formatted with they key
 
             encryptedLogin = encryptMessage(loginMessage, serverPublicKey) # encrypt the login message using the server's public key
 
@@ -200,11 +211,11 @@ def main():
 
 #Bring listener thread back for project 3
 
-            if receiverStarted == False:
-                thread = threading.Thread(
-                    target=listenForMessages, args=(dataSocket, clientPrivateKey),daemon=True)
-                thread.start()
-                receiverStarted = True
+                if receiverStarted == False:
+                    thread = threading.Thread(
+                        target=listenForMessages, args=(dataSocket, clientPrivateKey),daemon=True)
+                    thread.start()
+                    receiverStarted = True
             else:
                     print("500 status code received.")
 
@@ -215,18 +226,17 @@ def main():
             if clientSocket is None or dataSocket is None:
                  print("You must connect first.")
                  continue
-                   
-            clientSocket.sendall(userInput.encode())#send to server
 
- #           serverResponse = dataSocket.recv(1024).decode()
-  #          serverMessage = serverResponse.splitlines()
+            if serverPublicKey is None:
+                print("You must connect first.")
+                continue
 
-   #         if serverMessage[0] == "200":
-    #             connectedUsers = serverMessage[-1]
-     #            print("200 status code received. Users currently connected:", connectedUsers)
-                
-      #      else:
-       #          print("500 status code received.")   
+            if len(userParts) != 1:
+                print("who")
+                continue
+
+            encryptedCommand = encryptMessage(userInput, serverPublicKey)       
+            clientSocket.sendall(encryptedCommand)#send to server 
 
 #broadcast command
 #
@@ -235,31 +245,18 @@ def main():
             if clientSocket is None or dataSocket is None:
                  print("You must connect first.")
                  continue
+
+            if serverPublicKey is None:
+                print("You must connect first.")
+                continue
             
             if len(userParts) < 2:
                 print("broadcast <message>")
                 continue
 
-            clientSocket.sendall(userInput.encode())
+            encryptedCommand = encryptMessage(userInput, serverPublicKey)
+            clientSocket.sendall(encryptedCommand)
 
- #           serverResponse = dataSocket.recv(1024).decode()
-  #          serverMessage = serverResponse.splitlines()
-#
-   #         statusCode = serverMessage[0]
-
- #           if statusCode == "200":
-  #               messageType = serverMessage[2]
-   #              senderName = serverMessage[3]
-    #             messsageText = serverMessage[4]
-
-     #            if messsageText. endswith(" all!"):
-      #                messsageText = messsageText[:-5]
-
-       #          print(statusCode, "status code received.")
-        #         print(messageType, "message from", senderName, ":", messsageText)
-
-         #   else:
-          #      print("500 status code received")
 #private command
 #
 #
@@ -267,138 +264,22 @@ def main():
              if clientSocket is None or dataSocket is None:
                  print("You must connect first.")
                  continue
+
+             if serverPublicKey is None:
+                 print("You must connect first.")
+                 continue
              
              if len(userParts) < 3:
                   print("private <username> <message>")
                   continue
              
-             clientSocket.sendall(userInput.encode())
-
-      #       serverResponse = dataSocket.recv(1024).decode()
-       #      serverMessage = serverResponse.splitlines()
-
-        #     statusCode = serverMessage[0]
-
-         #    if statusCode == "200":
-          #        print("200 status code received. Message sent.")
-
-           #  else:
-            #      print("500 status code received.")
-
-# Project 2 
-# Requests a list of files currently stored on the server.
-# The server responds with 200 and a comma-separated list of filenames.
-
-#       elif command == "list":
-#            if clientSocket is None or dataSocket is None:
-#                  print("You must connect first.")
-#                  continue
-#             
-#             if len(userParts) != 1:
-#                  print("list")
-#                 continue
-#             
-#             clientSocket.sendall(userInput.encode())
-#
-#             serverResponse = dataSocket.recv(1024).decode()
-#             serverMessage = serverResponse.splitlines()
-#
-#             if serverMessage[0] == "200":
-#                  if len(serverMessage) >= 3:
-#                       print("200 status code received. Files:", serverMessage[2])
-#                  else:
-#                       print("200 status code received.")
-#             else:
-#                 print("500 status code received.")
+             encryptedCommand = encryptMessage(userInput, serverPublicKey)
+             clientSocket.sendall(encryptedCommand)
 
 
-# dele command
-# Requests the server to delete a file by filename.
-# The server responds with 200 if the file was deleted or 500 if it failed.
-#        elif command == "dele":
-             if clientSocket is None or dataSocket is None:
-                  print("You must connect first.")
-                  continue
-             
-             if len(userParts) != 2:
-                  print("dele <filename>")
-                  continue
-             
-             clientSocket.sendall(userInput.encode())
+        else:
+            print("Unknown command.")
 
-             serverResponse = dataSocket.recv(1024).decode().strip()
-
-             if serverResponse == "200":
-                  print("200 status code received. File deleted.")
-             else:
-                  print("500 status code received.")
-
-
-# stor command
-# Uploads a local file from the client to the server.
-# The command is sent through the control socket and the file contents are sent through the data socket.
-#        elif command == "stor":
-#             if clientSocket is None or dataSocket is None:
-#                  print("You must connect first.")
-#                  continue
-#             
-#             if len(userParts) != 2:
-#                  print("stor <filename>")
-#                  continue
-#             
-#             filename = userParts[1]
-
-#             try:
-#                  file = open(filename, "rb")
-#                  fileData = file.read()
-#                  file.close()
-#             except OSError:
-#                  continue
-             
-#             clientSocket.sendall(userInput.encode())
-#             dataSocket.sendall(fileData)
-
-#             serverResponse = dataSocket.recv(1024).decode().strip()
-
-#             if serverResponse == "200":
-#                  print("200 status code received. File Sent.")
-#             else:
-#                  print("500 status code received.")
-
-
-
-# retr command
-# Requests a file from the server and saves the received file contents on the client side.
-# The filename is sent through the control socket and the file data comes back through the data socket.
-#        elif command == "retr":
-#            if clientSocket is None or dataSocket is None:
-#                print("You must connect first.")
-#                continue
-
-#            if len(userParts) != 2:
-#                print("retr <filename>")
-#                continue
-
-#            filename = userParts[1].strip()
-
-#            clientSocket.sendall(userInput.encode())
-
-#            serverResponse = dataSocket.recv(4096)
-
-#           if serverResponse.decode(errors="ignore").startswith("500"):
-#                print("500 status code received.")
-#                continue
-
-#            newFilename = "downloaded_" + filename
-
-#           file = open(newFilename, "wb")
-#            file.write(serverResponse)
-#            file.close()
-
-#            print("File retrieved.")           
-             
-#        else:
-#            print("Unknown command.")
 
 if __name__ == "__main__":
     main()
