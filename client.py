@@ -29,7 +29,7 @@ def decryptMessage(encryptedMessage, privateKey):
     return decryptedMessage.decode()
 
 
-def listenForMessages(dataSocket):
+def listenForMessages(dataSocket, clientPrivateKey): #clientPrivateKey needs to be implemented into the listening thread
     while True:
         try:
             serverResponse = dataSocket.recv(1024).decode()
@@ -126,8 +126,12 @@ def main():
 
                 serverMessage = serverResponse.splitlines()
 
-                if serverMessage[0] == "200": #checking for server response confirmation
-                    dataPort = int(serverMessage[-1])
+                if serverMessage[0] == "200": #checking for server response confirmation; Encrypt
+                    dataPort = int(serverMessage[2])
+
+                    serverPublicKeyText = "\n".join(serverMessage[3:])
+                    serverPublicKey = stringToPublicKey(serverPublicKeyText)
+                    
 
                     print(serverMessage[0], "status code received. Starting data connection on port", dataPort)
 
@@ -169,25 +173,38 @@ def main():
                 print("You must connect first.")
                 continue
 
+            if serverPublicKey is None:
+                 print("You mist connect first.")
+                 continue
+
             if len(userParts) != 2:
                      print("login <username>")
                      continue
-                
-            clientSocket.sendall(userInput.encode())
 
-            serverResponse = dataSocket.recv(1024).decode().strip()
+            username = userParts[1]
+            clientPublicKeyText = publicKeyToString(clientPublicKey)
 
-            if serverResponse == "200":
-                    print(serverMessage[0], "status code received. Login successful")
+            loginMessage = "login\n\n" + username + "\n" + clientPublicKeyText
+
+            encryptedLogin = encryptMessage(loginMessage, serverPublicKey) # encrypt the login message using the server's public key
+
+            clientSocket.sendall(encryptedLogin) # send encrypted login over the control socket
+
+            encryptedResponse = dataSocket.recv(4096) # receive encrypted response from the server through the data socket
+            print("Received encrypted message")
+
+            serverResponse = decryptMessage(encryptedResponse, clientPrivateKey) # decrypt the response using this client's private key
+
+            if serverResponse.strip() == "200":
+                print("200 status code received. Login successful")
 
 #Bring listener thread back for project 3
 
             if receiverStarted == False:
-                    thread = threading.Thread(
-                     target=listenForMessages, args=(dataSocket,),daemon=True)
-                    thread.start()
-                    receiverStarted = True
-
+                thread = threading.Thread(
+                    target=listenForMessages, args=(dataSocket, clientPrivateKey),daemon=True)
+                thread.start()
+                receiverStarted = True
             else:
                     print("500 status code received.")
 
