@@ -10,7 +10,7 @@ BLOCK_SIZE = KEY_SIZE_BITS // 8 # 256 bytes
 OAEP_HASH = hashes.SHA256
 MAX_CHUNK = BLOCK_SIZE - 2 * OAEP_HASH.digest_size - 2 # 190 bytes
 
-
+# helper function to create an oaep padding object
 def oaep():
     return padding.OAEP(
         mgf=padding.MGF1(algorithm=OAEP_HASH()),
