@@ -1,272 +1,305 @@
 import socket
 import sys
 import threading
-import os
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+KEY_SIZE_BITS = 2048
+BLOCK_SIZE = KEY_SIZE_BITS // 8 # 256 bytes
+OAEP_HASH = hashes.SHA256
+MAX_CHUNK = BLOCK_SIZE - 2 * OAEP_HASH.digest_size - 2 # 190 bytes
 
 
-SERVER_FOLDER = "server_files"
-os.makedirs(SERVER_FOLDER, exist_ok=True)   #creates a seperate folder for the server files
+def oaep():
+    return padding.OAEP(
+        mgf=padding.MGF1(algorithm=OAEP_HASH()),
+        algorithm=OAEP_HASH(),
+        label=None,
+    )
 
+# create a rsa key pair
+def create_keys():
+    """Create an RSA 2048 public/private key pair."""
+    private_key = rsa.generate_private_key(public_exponent=65537,
+                                           key_size=KEY_SIZE_BITS)
+    return private_key, private_key.public_key()
+
+# serialize public key to a pem string
+def public_key_to_string(public_key):
+    """Serialize a public key to a PEM string."""
+    pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return pem.decode()
+
+# load a public key from a pem string
+def string_to_public_key(text):
+    return serialization.load_pem_public_key(text.encode())
+
+# encrypt messages using rsa
+def encrypt_message(message, public_key):
+    data = message.encode()
+    ciphertext = b""
+    for i in range(0, len(data), MAX_CHUNK):
+        ciphertext += public_key.encrypt(data[i:i + MAX_CHUNK], oaep())
+    return ciphertext
+
+# decrypt messages using rsa
+def decrypt_message(ciphertext, private_key):
+    if len(ciphertext) == 0 or len(ciphertext) % BLOCK_SIZE != 0:
+        raise ValueError("ciphertext is not a whole number of RSA blocks")
+
+    plaintext = b""
+    for i in range(0, len(ciphertext), BLOCK_SIZE):
+        plaintext += private_key.decrypt(ciphertext[i:i + BLOCK_SIZE], oaep())
+    return plaintext.decode()
+
+# dictionary of clients
 clients = {}
+clients_lock = threading.Lock()
 
-# sends a response to a single client
-def send_response(sock, status, data=None):
-    if data is None:
-        message = str(status)
-    else:
-        message = str(status) + "\n\n" + data
-    sock.sendall(message.encode())
+# build a response string from a status code
+def build_response(status, lines=None):
+    if not lines:
+        return str(status)
 
-# send same message to every logged in user
-def send_to_everyone(status, data):
-    for sock in list(clients.values()):
-        try:
-            send_response(sock, status, data)
-        except OSError:
-            pass
+    body = "\n".join(lines)
+    return str(status) + "\n\n" + body
 
-# send a message to everone expcept one user
-def send_to_others(status, data, skip_user):
-    for name in list(clients.keys()):
+# send an unencrypted response
+def send_plain(sock, text):
+    sock.sendall(text.encode())
+
+# encrypt a response with the public key and send it
+def send_encrypted(sock, public_key, text):
+    sock.sendall(encrypt_message(text, public_key))
+
+# sends and encrypted message to one user
+def send_to_user(username, status, lines=None):
+    with clients_lock:
+        entry = clients.get(username)
+        if entry is None:
+            return
+        sock = entry["data"]
+        key = entry["key"]
+    try:
+        send_encrypted(sock, key, build_response(status, lines))
+    except (OSError, ValueError):
+        pass
+
+# sends an encrypted response to all logged-in users
+def send_to_everyone(status, lines=None, skip_user=None):
+    with clients_lock:
+        recipients = list(clients.keys())
+
+    for name in recipients:
         if name == skip_user:
             continue
-        try:
-            send_response(clients[name], status, data)
-        except OSError:
-            pass
+        send_to_user(name, status, lines)
 
-# handles one client from start to finish
-def handle_client(control_sock, data_listener):
+# read an encrypted message from a socket
+def recv_encrypted(sock):
+    buffer = b""
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            return None
+        buffer += chunk
+        if len(buffer) % BLOCK_SIZE == 0:
+            return buffer
+        
+# report a failed login on the data socket, encrypted when the client's key is known
+def send_login_failure(data_sock, client_public_key=None):
+    try:
+        if client_public_key is not None:
+            send_encrypted(data_sock, client_public_key, build_response(500))
+        else:
+            send_plain(data_sock, build_response(500))
+    except (OSError, ValueError):
+        pass
+
+# handle a login request from a client
+def handle_login(message, data_sock, server_private_key):
+    lines = message.split("\n")
+
+    # drop the "login" keyword and any blank separator lines before the body
+    body = [line for line in lines[1:] if line.strip() != ""]
+
+    if len(body) < 2:
+        print("Login requested by: <malformed request>")
+        send_login_failure(data_sock)
+        return None
+
+    username = body[0].strip()
+    key_text = "\n".join(body[1:])
+
+    print("Login requested by:", username)
+
+    if username == "":
+        send_login_failure(data_sock)
+        return None
+
+    # validate the public key before registering anything
+    try:
+        client_public_key = string_to_public_key(key_text)
+    except (ValueError, TypeError):
+        send_login_failure(data_sock)
+        return None
+
+    with clients_lock:
+        if username in clients:  # username must be unique
+            send_login_failure(data_sock, client_public_key)
+            return None
+        clients[username] = {"data": data_sock, "key": client_public_key}
+
+    # the join broadcast doubles as the login confirmation for the new user
+    send_to_everyone(200, ["join", username])
+    return username
+
+# handle a "who" request from a client
+def handle_who(username):
+    print("Who requested. Sending users.")
+    with clients_lock:
+        others = [name for name in clients if name != username]
+    send_to_user(username, 200, ["who", ", ".join(others)])
+
+# handle a broadcast message from one user to all others
+def handle_broadcast(message, username):
+    # everything after the "broadcast" keyword is the message text
+    parts = message.split(" ", 1)
+    text = parts[1] if len(parts) > 1 else ""
+
+    print("Broadcast requested by", username)
+    print("Message:", text)
+
+    # each client gets its own encrypted copy
+    send_to_everyone(200, ["broadcast", username, text])
+
+# handle a private message from one user to another
+def handle_private(message, username):
+    parts = message.split(" ", 2)
+    if len(parts) < 3 or parts[1].strip() == "" or parts[2] == "":
+        send_to_user(username, 500)
+        return
+
+    recipient = parts[1].strip()
+    text = parts[2]
+
+    print("Private message from", username, "to", recipient)
+
+    with clients_lock:
+        known = recipient in clients
+
+    if not known:
+        send_to_user(username, 500)
+        return
+
+    send_to_user(recipient, 200, ["private", username, text])
+    send_to_user(username, 200, ["sent", recipient])
+
+# handle a single client connection on the control socket
+def handle_client(control_sock, server_private_key, server_public_key):
     username = None
+    data_listener = None
     data_sock = None
 
     try:
-        data_sock, _ = data_listener.accept()
-        # keep reading commands until client disconnects
-        while True:
-            raw = control_sock.recv(1024)
-            if not raw:
-                break 
+        raw = control_sock.recv(1024)
+        if not raw:
+            return
 
-            message = raw.decode().strip()
+        first = raw.decode(errors="ignore").strip()
+        if not first.lower().startswith("connect"):
+            send_plain(control_sock, build_response(500))
+            return
+
+        print("Connection requested. Creating data socket")
+
+        # bind to port 0 and let the OS choose a free port
+        data_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        data_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        data_listener.bind(("", 0))
+        data_listener.listen(1)
+        data_port = data_listener.getsockname()[1]
+
+        # reply on the control socket with the data port and public key
+        reply = "200\n\n" + str(data_port) + "\n" + public_key_to_string(server_public_key)
+        send_plain(control_sock, reply)
+
+        data_listener.settimeout(30)
+        data_sock, _ = data_listener.accept()
+        data_listener.settimeout(None)
+
+        while True:
+            ciphertext = recv_encrypted(control_sock)
+            if ciphertext is None:
+                break
+
+            print("Received encrypted message")
+
+            try:
+                message = decrypt_message(ciphertext, server_private_key).strip()
+            except (ValueError, TypeError):
+                # nobody to reply to safely unless logged in
+                if username is not None:
+                    send_to_user(username, 500)
+                continue
+
             if message == "":
                 continue
 
-            words = message.split()
-            command = words[0].lower()
+            command = message.split()[0].split("\n")[0].lower()
 
-            # login command
             if command == "login":
-                if len(words) > 1:
-                    requested_name = words[1]
-                else:
-                    requested_name = ""
-
-                print("Login requested by:", requested_name)
-
-                # reject empty names or names in use
-                if requested_name == "" or requested_name in clients:
-                    send_response(data_sock, 500)
+                if username is not None: # already logged in
+                    send_to_user(username, 500)
                     continue
 
-                # register user
-                username = requested_name
-                clients[username] = data_sock
-                send_response(data_sock, 200)
-
-            # who
-            elif command == "who":
-                print("Who requested. Sending users.")
-                user_list = ", ".join(clients.keys())
-                send_response(data_sock, 200, user_list)
-
-            # broadcast
-            elif command == "broadcast":
-                # everything after the word "broadcast" is the message
-                if " " in message:
-                    text = message.split(" ", 1)[1]
-                else:
-                    text = ""
-
-                if username is not None:
-                    sender = username
-                else:
-                    sender = "unknown"
-
-                print("Broadcast requested by", sender)
-                print("Message:", text)
-
-                send_to_everyone(200, "Broadcast\n" + sender + "\n" + text)
-
-            # private
-            elif command == "private":
-                # needs to pass in private "username" "message"
-                if len(words) < 3:
-                    send_response(data_sock, 500)
+                username = handle_login(message, data_sock, server_private_key)
+                if username is None:
+                    # failure sent, keep the connection so the client can retry
                     continue
 
-                # split into 3 pieces: "private", recipient, and the text
-                pieces = message.split(" ", 2)
-                recipient = pieces[1]
-                text = pieces[2]
-
-                if username is not None:
-                    sender = username
-                else:
-                    sender = "unknown"
-
-                print("Private message from", sender, "to", recipient)
-
-                # if recipient is not logged in, send error back to sender
-                if recipient not in clients:
-                    send_response(data_sock, 500)
-                    continue
-
-                # send the message to the recipient, then confirm to the sender
-                send_response(clients[recipient], 200,
-                              "Private\n" + sender + "\n" + text)
-                send_response(data_sock, 200)
-            
-            # quit
-            elif command == "quit":
-                if username is not None:
-                    print("Quit requested by", username)
-                else:
-                    print("Quit requested by client")
-                send_response(data_sock, 200)
+            elif username is None:
+                # every other command requires a log in
                 break
 
-            #Project 2 - List
-            #Returns a list of all files in the current directory to the client.
-            elif command == "list":
-                if username is not None:
-                    print("List requested by", username + ". Sending files.")
-                else:
-                    print("List requested. Sending files.")
+            elif command == "who":
+                handle_who(username)
 
-                files = []
+            elif command == "broadcast":
+                handle_broadcast(message, username)
 
-                for file in os.listdir(SERVER_FOLDER):
-                    if os.path.isfile(os.path.join(SERVER_FOLDER, file)):
-                        files.append(file)
+            elif command == "private":
+                handle_private(message, username)
 
-                listing = ", ".join(files)
-                send_response(data_sock, 200, listing)
-
-            #Project 2 - Delete
-            #Deletes a specified file from the server's current directory.
-            elif command == "dele":
-                if len(words) != 2:
-                    send_response(data_sock, 500)
-                    continue
-
-                filename = words[1]
-
-                if username is not None:
-                    print("Delete requested by", username + ". Deleting file:", filename)
-                else:
-                    print("Delete requested. Deleting file:", filename)
-
-                try:
-                    file_path = os.path.join(SERVER_FOLDER, filename)
-                    os.remove(file_path)   #deletes the file from the server's folder#
-                    
-                    print ("Delete complete")
-                    send_response(data_sock, 200)
-                
-                except OSError:
-                    send_response(data_sock, 500)
-
-            # project 2 - stor
-            # receives a file's contents and saves it in the directory 
-
-            elif command == "stor":
-                if len(words) != 2:
-                    send_response(data_sock, 500)
-                    continue
-
-                filename = words[1]
-
-                if username is not None:
-                    print("Stor", filename, "requested by", username)
-                else:
-                    print("Stor", filename, "requested")
-
-                file_data = b""
-                data_sock.settimeout(1.0)
-                try:
-                    while True:
-                        chunk = data_sock.recv(4096)
-                        if not chunk:
-                            break
-                        file_data += chunk
-                except socket.timeout:
-                    pass
-                finally:
-                    data_sock.settimeout(None)
-
-                try:
-                    file_path = os.path.join(SERVER_FOLDER, filename)
-
-                    with open(file_path, "wb") as f:
-                        f.write(file_data)
-                    print("STOR complete")
-                    send_response(data_sock, 200)
-                except OSError:
-                    send_response(data_sock, 500)
-
-            # project 2 - Retr
-            # sends the file's contents back over the data port
-            elif command == "retr":
-                if len(words) != 2:
-                    send_response(data_sock, 500)
-                    continue
-
-                filename = words[1]
-
-                if username is not None:
-                    print("Retr requested by", username + ". Sending file:", filename)
-                else:
-                    print("Retr requested. Sending file:", filename)
-
-                try:
-                    file_path = os.path.join(SERVER_FOLDER, filename)   #retrieves files from the server's folder
-                    with open(file_path, "rb") as f:
-                        file_data = f.read()
-                except OSError:
-                    send_response(data_sock, 500)
-                    continue
-
-                data_sock.sendall(file_data)
-                print("File sent.")
+            elif command == "quit":
+                print("Quit requested by", username)
+                send_to_user(username, 200, ["quit"])
+                break
 
             else:
-                send_response(data_sock, 500)
-                
-            
+                send_to_user(username, 500)
 
-    except OSError:
-        pass 
+    except (OSError, ValueError):
+        pass
 
     finally:
-        # remove the user 
         if username is not None:
-            if username in clients:
-                del clients[username] 
-                
-        # close all sockets for that client
-        for sock in (data_sock, control_sock, data_listener):
+            with clients_lock:
+                clients.pop(username, None)
+
+        for sock in (data_sock, data_listener, control_sock):
             if sock is not None:
                 try:
                     sock.close()
                 except OSError:
                     pass
 
-
+# main entry point for the server
 def main():
-    # The control port is given on the command line 8991
     if len(sys.argv) != 2:
         print("Usage: python server.py <control_port>")
         sys.exit(1)
@@ -278,8 +311,12 @@ def main():
         sys.exit(1)
 
     print("Starting server...")
-    print("Creating server socket")
 
+    print("Creating RSA keypair")
+    server_private_key, server_public_key = create_keys()
+    print("RSA keypair created")
+
+    print("Creating server socket")
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(("", control_port))
@@ -289,42 +326,13 @@ def main():
 
     try:
         while True:
-            # wait for a new client to connect on the control port
             control_sock, _ = server_socket.accept()
-
-            raw = control_sock.recv(1024)
-            if not raw:
-                control_sock.close()
-                continue
-
-            first_command = raw.decode().strip().split()[0].lower()
-
-            # the first thing a client must send is "connect"
-            if first_command != "connect":
-                send_response(control_sock, 500)
-                control_sock.close()
-                continue
-
-            print("Connection requested. Creating data socket")
-
-            # create a new socket just for sending data to this client
-            # binding to port 0 lets the OS pick any free port for us
-            data_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            data_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            data_listener.bind(("", 0))
-            data_listener.listen(1)
-
-            # tell client which port to connect to
-            data_port = data_listener.getsockname()[1]
-            send_response(control_sock, 200, str(data_port))
-
-            # handle the client in its own thread to support multiple concourrnt clients
-            client_thread = threading.Thread(
+            thread = threading.Thread(
                 target=handle_client,
-                args=(control_sock, data_listener),
-                daemon=True)
-            client_thread.start()
-
+                args=(control_sock, server_private_key, server_public_key),
+                daemon=True,
+            )
+            thread.start()
     except KeyboardInterrupt:
         pass
     finally:
