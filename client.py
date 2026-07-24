@@ -37,6 +37,20 @@ def publicKeyToString(publicKey):
 def stringToPublicKey(publicKeyText):
     return serialization.load_pem_public_key(publicKeyText.encode())
 
+def recvEncrypted(sock): #helper function for receiving the encrpyted data from the server
+    buffer = b""
+
+    while True:
+        chunk = sock.recv(4096)
+
+        if not chunk:
+            return None
+
+        buffer += chunk
+
+        if len(buffer) % BLOCK_SIZE == 0:
+            return buffer
+
 
 def encryptMessage(message, publicKey):
     data = message.encode()
@@ -61,6 +75,7 @@ def decryptMessage(encryptedMessage, privateKey):
         )
 
     return decryptedMessage.decode()
+
 
 def listenForMessages(dataSocket, clientPrivateKey): #clientPrivateKey needs to be implemented into the listening thread
     while True:
@@ -155,7 +170,7 @@ def main():
                 clientSocket.connect((clientIp, clientPort)) # creating inital connection socket
                 clientSocket.sendall(userInput.encode())
 
-                serverResponse = clientSocket.recv(1024).decode()
+                serverResponse = clientSocket.recv(4096).decode()
 
                 serverMessage = serverResponse.splitlines()
 
@@ -195,13 +210,18 @@ def main():
             encryptedCommand = encryptMessage(userInput, serverPublicKey)
             clientSocket.sendall(encryptedCommand) #send to server
 
-            encryptedResponse = dataSocket.recv(4096)
-            print("Received encrypted message") #receive response
+            encryptedResponse = recvEncrypted(dataSocket) #receive response
+
+            if encryptedResponse is None:
+                print("500 status code received.") #check for response
+                continue
+
+            print("Received encrypted message") #client confirmation
 
             serverResponse = decryptMessage(encryptedResponse, clientPrivateKey)
             serverMessage = serverResponse.splitlines() 
 
-            if serverResponse.strip() == "200":
+            if len(serverMessage) > 0 and serverMessage[0] == "200":
                 print("200 status code received.")
             else:
                 print("500 status code received.")
@@ -219,7 +239,7 @@ def main():
                 continue
 
             if serverPublicKey is None:
-                 print("You mist connect first.")
+                 print("You must connect first.")
                  continue
 
             if len(userParts) != 2:
@@ -235,12 +255,18 @@ def main():
 
             clientSocket.sendall(encryptedLogin) # send encrypted login over the control socket
 
-            encryptedResponse = dataSocket.recv(4096) # receive encrypted response from the server through the data socket
+            encryptedResponse = recvEncrypted(dataSocket)
+
+            if encryptedResponse is None:
+                print("500 status code received.")
+                continue
+
             print("Received encrypted message")
 
-            serverResponse = decryptMessage(encryptedResponse, clientPrivateKey) # decrypt the response using this client's private key
+            serverResponse = decryptMessage(encryptedResponse, clientPrivateKey)
+            serverMessage = serverResponse.splitlines() #receive response from server
 
-            if serverResponse.strip() == "200":
+            if len(serverMessage) > 0 and serverMessage[0] == "200": #check server message formatting
                 print("200 status code received. Login successful")
 
 #Bring listener thread back for project 3
