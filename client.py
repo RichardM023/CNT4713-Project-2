@@ -4,12 +4,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 KEY_SIZE_BITS = 2048
-BLOCK_SIZE = KEY_SIZE_BITS // 8
+BLOCK_SIZE = KEY_SIZE_BITS // 8 #256 byte chunks
 OAEP_HASH = hashes.SHA256
 MAX_CHUNK = BLOCK_SIZE - 2 * OAEP_HASH.digest_size - 2
 
 
-def oaep():
+def oaep(): #security padding used for encrypting and decrypting
     return padding.OAEP(
         mgf=padding.MGF1(algorithm=OAEP_HASH()),
         algorithm=OAEP_HASH(),
@@ -17,7 +17,7 @@ def oaep():
     )
 
 
-def createKeys():
+def createKeys(): #creates clients RSA key pair; private and public
     privateKey = rsa.generate_private_key(
         public_exponent=65537,
         key_size=KEY_SIZE_BITS
@@ -26,7 +26,7 @@ def createKeys():
     return privateKey, publicKey
 
 
-def publicKeyToString(publicKey):
+def publicKeyToString(publicKey): #converts public key into text to be sent over to server
     pem = publicKey.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
@@ -34,10 +34,10 @@ def publicKeyToString(publicKey):
     return pem.decode()
 
 
-def stringToPublicKey(publicKeyText):
+def stringToPublicKey(publicKeyText): # takes key received as text and turns it back into key for encryption 
     return serialization.load_pem_public_key(publicKeyText.encode())
 
-def recvEncrypted(sock): #helper function for receiving the encrpyted data from the server
+def recvEncrypted(sock): #helper function for receiving the encrypted data from the server
     buffer = b""
 
     while True:
@@ -48,11 +48,11 @@ def recvEncrypted(sock): #helper function for receiving the encrpyted data from 
 
         buffer += chunk
 
-        if len(buffer) % BLOCK_SIZE == 0:
+        if len(buffer) % BLOCK_SIZE == 0: #checks that entire message is received before decrypting
             return buffer
 
 
-def encryptMessage(message, publicKey):
+def encryptMessage(message, publicKey): #encrypt message before sending
     data = message.encode()
     encryptedMessage = b""
 
@@ -62,17 +62,14 @@ def encryptMessage(message, publicKey):
     return encryptedMessage
 
 
-def decryptMessage(encryptedMessage, privateKey):
+def decryptMessage(encryptedMessage, privateKey): #decrypt the encrypted messages after receiving
     if len(encryptedMessage) == 0 or len(encryptedMessage) % BLOCK_SIZE != 0:
         raise ValueError("ciphertext is not a whole number of RSA blocks")
 
     decryptedMessage = b""
 
     for i in range(0, len(encryptedMessage), BLOCK_SIZE):
-        decryptedMessage += privateKey.decrypt(
-            encryptedMessage[i:i + BLOCK_SIZE],
-            oaep()
-        )
+        decryptedMessage += privateKey.decrypt(encryptedMessage[i:i + BLOCK_SIZE], oaep())
 
     return decryptedMessage.decode()
 
