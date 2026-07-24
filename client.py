@@ -1,33 +1,66 @@
 import socket
 import threading
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+KEY_SIZE_BITS = 2048
+BLOCK_SIZE = KEY_SIZE_BITS // 8
+OAEP_HASH = hashes.SHA256
+MAX_CHUNK = BLOCK_SIZE - 2 * OAEP_HASH.digest_size - 2
+
+
+def oaep():
+    return padding.OAEP(
+        mgf=padding.MGF1(algorithm=OAEP_HASH()),
+        algorithm=OAEP_HASH(),
+        label=None
+    )
+
 
 def createKeys():
-     key = RSA.generate(2048)
-     privateKey = key
-     publicKey = key.publickey()
-     return privateKey, publicKey
+    privateKey = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=KEY_SIZE_BITS
+    )
+    publicKey = privateKey.public_key()
+    return privateKey, publicKey
+
 
 def publicKeyToString(publicKey):
-    return publicKey.export_key().decode()
+    pem = publicKey.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return pem.decode()
 
 
 def stringToPublicKey(publicKeyText):
-    return RSA.import_key(publicKeyText.encode())
+    return serialization.load_pem_public_key(publicKeyText.encode())
 
 
 def encryptMessage(message, publicKey):
-    cipher = PKCS1_OAEP.new(publicKey)
-    encryptedMessage = cipher.encrypt(message.encode())
+    data = message.encode()
+    encryptedMessage = b""
+
+    for i in range(0, len(data), MAX_CHUNK):
+        encryptedMessage += publicKey.encrypt(data[i:i + MAX_CHUNK], oaep())
+
     return encryptedMessage
 
 
 def decryptMessage(encryptedMessage, privateKey):
-    cipher = PKCS1_OAEP.new(privateKey)
-    decryptedMessage = cipher.decrypt(encryptedMessage)
-    return decryptedMessage.decode()
+    if len(encryptedMessage) == 0 or len(encryptedMessage) % BLOCK_SIZE != 0:
+        raise ValueError("ciphertext is not a whole number of RSA blocks")
 
+    decryptedMessage = b""
+
+    for i in range(0, len(encryptedMessage), BLOCK_SIZE):
+        decryptedMessage += privateKey.decrypt(
+            encryptedMessage[i:i + BLOCK_SIZE],
+            oaep()
+        )
+
+    return decryptedMessage.decode()
 
 def listenForMessages(dataSocket, clientPrivateKey): #clientPrivateKey needs to be implemented into the listening thread
     while True:
@@ -160,12 +193,13 @@ def main():
                 continue
 
             encryptedCommand = encryptMessage(userInput, serverPublicKey)
-            clientSocket.sendall(encryptedCommand)
+            clientSocket.sendall(encryptedCommand) #send to server
 
             encryptedResponse = dataSocket.recv(4096)
-            print("Received encrypted message")
+            print("Received encrypted message") #receive response
 
             serverResponse = decryptMessage(encryptedResponse, clientPrivateKey)
+            serverMessage = serverResponse.splitlines() 
 
             if serverResponse.strip() == "200":
                 print("200 status code received.")
@@ -231,12 +265,12 @@ def main():
                 print("You must connect first.")
                 continue
 
-            if len(userParts) != 1:
+            if len(userParts) != 1: #check for formatting
                 print("who")
                 continue
 
             encryptedCommand = encryptMessage(userInput, serverPublicKey)       
-            clientSocket.sendall(encryptedCommand)#send to server 
+            clientSocket.sendall(encryptedCommand) #send to server 
 
 #broadcast command
 #
@@ -250,12 +284,12 @@ def main():
                 print("You must connect first.")
                 continue
             
-            if len(userParts) < 2:
+            if len(userParts) < 2: #check for formatting
                 print("broadcast <message>")
                 continue
 
             encryptedCommand = encryptMessage(userInput, serverPublicKey)
-            clientSocket.sendall(encryptedCommand)
+            clientSocket.sendall(encryptedCommand) #send to server
 
 #private command
 #
@@ -269,12 +303,12 @@ def main():
                  print("You must connect first.")
                  continue
              
-             if len(userParts) < 3:
+             if len(userParts) < 3: #check for formatting
                   print("private <username> <message>")
                   continue
              
              encryptedCommand = encryptMessage(userInput, serverPublicKey)
-             clientSocket.sendall(encryptedCommand)
+             clientSocket.sendall(encryptedCommand) #send to server
 
 
         else:
