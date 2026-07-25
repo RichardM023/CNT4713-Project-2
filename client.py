@@ -74,51 +74,53 @@ def decryptMessage(encryptedMessage, privateKey): #decrypt the encrypted message
     return decryptedMessage.decode()
 
 
-def listenForMessages(dataSocket, clientPrivateKey): #clientPrivateKey needs to be implemented into the listening thread
+def listenForMessages(dataSocket, clientPrivateKey): #listens for and handles every server message after login
     while True:
         try:
-            serverResponse = dataSocket.recv(1024).decode()
-
-            if serverResponse == "":
+            encryptedResponse = recvEncrypted(dataSocket)
+            if encryptedResponse is None:
                 break
+
+            serverResponse = decryptMessage(encryptedResponse, clientPrivateKey)
 
             serverMessage = serverResponse.splitlines()
 
             if len(serverMessage) == 0:
                 continue
 
+            #join notice for another user - consume silently, print nothing (must be before the line below)
+            if len(serverMessage) >= 4 and serverMessage[2] == "join":
+                continue
+
+            print("\nReceived encrypted message") #every real response starts with this
+
             if serverMessage[0] == "500":
-                print("\n500 status code received.")
+                print("500 status code received.")
                 print("> ", end="", flush=True)
                 continue
 
-            if len(serverMessage) >= 5 and serverMessage[2] == "Broadcast": #check for broadcast command
+            if len(serverMessage) >= 5 and serverMessage[2] == "broadcast": #check for broadcast command
                 senderName = serverMessage[3]
                 messageText = serverMessage[4]
 
-                if messageText.endswith(" all!"):
-                    messageText = messageText[:-5]
-
-                print()
                 print("200 status code received.")
                 print("Broadcast message from", senderName + ":", messageText)
 
-            elif len(serverMessage) >= 5 and serverMessage[2] == "Private": #check for private command
+            elif len(serverMessage) >= 5 and serverMessage[2] == "private": #recipient of a private message
                 senderName = serverMessage[3]
                 messageText = serverMessage[4]
 
-                print()
-                print("200 status code received. Message sent.")
+                print("200 status code received.")
                 print(senderName + ":", messageText)
 
-            elif len(serverMessage) >= 3: #check for who command
-                connectedUsers = serverMessage[2]
+            elif len(serverMessage) >= 4 and serverMessage[2] == "sent": #confirmation for the sender of a private message
+                print("200 status code received. Message sent.")
 
-                print()
+            elif len(serverMessage) >= 4 and serverMessage[2] == "who": #check for who command
+                connectedUsers = serverMessage[3]
                 print("200 status code received. Users currently connected:", connectedUsers)
 
-            else:
-                print()
+            else: #covers the quit confirmation and any other 200 response
                 print("200 status code received.")
 
             print("> ", end="", flush=True)
@@ -207,21 +209,9 @@ def main():
             encryptedCommand = encryptMessage(userInput, serverPublicKey)
             clientSocket.sendall(encryptedCommand) #send to server
 
-            encryptedResponse = recvEncrypted(dataSocket) #receive response
-
-            if encryptedResponse is None:
-                print("500 status code received.") #check for response
-                continue
-
-            print("Received encrypted message") #client confirmation
-
-            serverResponse = decryptMessage(encryptedResponse, clientPrivateKey)
-            serverMessage = serverResponse.splitlines() 
-
-            if len(serverMessage) > 0 and serverMessage[0] == "200":
-                print("200 status code received.")
-            else:
-                print("500 status code received.")
+            if thread is not None:
+                thread.join() #wait for the listener thread to finish
+                thread.join()
 
             clientSocket.close()
             dataSocket.close()
