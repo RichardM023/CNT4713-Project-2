@@ -1,0 +1,23 @@
+a. What is one major difference between the protocol in this project when
+compared to the TLS protocol?
+One big difference between the protocol in this project and TLS protocol is that TLS uses a better complete handskate verification system
+that is used to verify the identity of the server. In our project, the client and server exchange public keys
+and then use those keys to encrypt messages. On the other hand, TLS uses certificates from trusted authories to prove that
+the server is really who they claim. 
+
+b. What flaws can you identify in the “secure” protocol?
+A flaw that can be identify in the secure protocol si that the public key exchange can be vulnerable to a man in the
+middle attack. Since the client accepts the servers public ke during the inital connection without verification, an attacker
+could intercept the connection and send their own public key instead. Then the client would unknowingly encrypt messages
+using the attacker's key. This means the messages would be encrypted, but not necessarily encrypted to the real server.
+
+c. How could the “secure” server and client framework above be
+compromised?
+The server and client framework could be compromised if an attacker intercepts the public key exchange. For example, when the client
+first connects, the server sends back its public key as text. If an attacker is between the client and server, they could replace that key with their own
+The client would then send information to the attacker, who could decrypt them, read them and encrypt them again before sending it to the real server.
+
+d. How could you improve the framework? Be specific with your answers
+One way to improve the framework would be to add message authentication to each encrypted message. This would let the client and server confirm that a message was actually sent by
+the expected person and that it was not changed while traveling through the network. Even if the message is encrypted, authentication adds another layer of protection by helping 
+detect tampering or fake messages before they are accepted.
