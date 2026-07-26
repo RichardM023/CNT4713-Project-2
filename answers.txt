@@ -6,7 +6,7 @@ and then use those keys to encrypt messages. On the other hand, TLS uses certifi
 the server is really who they claim. 
 
 b. What flaws can you identify in the “secure” protocol?
-A flaw that can be identify in the secure protocol si that the public key exchange can be vulnerable to a man in the
+A flaw that can be identify in the secure protocol is that the public key exchange can be vulnerable to a man in the
 middle attack. Since the client accepts the servers public ke during the inital connection without verification, an attacker
 could intercept the connection and send their own public key instead. Then the client would unknowingly encrypt messages
 using the attacker's key. This means the messages would be encrypted, but not necessarily encrypted to the real server.
