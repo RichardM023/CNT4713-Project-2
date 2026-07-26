@@ -20,14 +20,12 @@ def oaep():
 
 # create a rsa key pair
 def create_keys():
-    """Create an RSA 2048 public/private key pair."""
     private_key = rsa.generate_private_key(public_exponent=65537,
                                            key_size=KEY_SIZE_BITS)
     return private_key, private_key.public_key()
 
 # serialize public key to a pem string
 def public_key_to_string(public_key):
-    """Serialize a public key to a PEM string."""
     pem = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
